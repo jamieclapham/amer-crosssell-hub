@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SalesHub</title>
+<script src="/client/quick.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header class="hub-header">
+    <div class="header-left">
+      <img src="img/shopify-logo.svg" alt="Shopify" class="hub-logo">
+      <h1>SalesHub</h1>
+    </div>
+    <div class="header-right">
+      <select id="coachSelector" class="manager-rep-selector" style="display:none" onchange="window.onCoachChange(this.value)">
+        <option value="__all__">All coaches</option>
+      </select>
+      <select id="repSelector" class="manager-rep-selector" style="display:none" onchange="window.onRepChange(this.value)">
+        <option value="__all__">All reps</option>
+      </select>
+      <span id="quarterLabel"></span>
+      <span id="lastUpdated"></span>
+      <button class="refresh-btn" onclick="window.refreshData()">Refresh</button>
+    </div>
+  </header>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="status-bar"></div>
+
+  <!-- Tab navigation -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" id="tab-btn-overview" onclick="window.ui.switchTab('overview')">Sales Dive</button>
+    <button class="tab-btn" id="tab-btn-tiering" onclick="window.ui.switchTab('tiering')">Tiering</button>
+    <button class="tab-btn" id="tab-btn-toolkit" onclick="window.ui.switchTab('toolkit')">AI Toolkit</button>
+  </nav>
+
+  <!-- Tab panes -->
+  <div class="tab-pane" id="tab-overview"></div>
+  <div class="tab-pane" id="tab-tiering" style="display:none"></div>
+  <div class="tab-pane" id="tab-toolkit" style="display:none"></div>
+
+  <!-- Access denied (hidden by default) -->
+  <div class="access-denied" id="access-denied" style="display:none">
+    <h2>Access restricted</h2>
+    <p>This dashboard is for the AMER SMB Cross-Sell team.<br>Contact <strong>@jamie.clapham</strong> on Slack for access.</p>
+  </div>
+
+</div>
+
+<script type="module">
+import { REP_ROSTER, MANAGER_EMAILS, QUARTER, COACHES, COACH_QUOTAS, loadBenchmarkOverrides, loadQuotaFallback } from './config.js';
+import * as ui from './ui.js';
+import * as queries from './queries.js';
+import { renderOverview } from './tabs/overview.js';
+import { renderAITools } from './tabs/ai-tools.js';
+import { renderTiering } from './tabs/tiering.js';
+import { destroyAllCharts } from './chart-utils.js';
+
+// Expose ui to inline onclick handlers
+window.ui = ui;
+
+// --- App state ---
+let currentUser = null;   // { email, name, sfName, isManager }
+let selectedRep = null;    // email string or '__all__' — for manager drill-down
+let selectedTeam = null;   // 'D2CRETAIL1', 'D2CRETAIL2', or null (all)
+let appData = {};          // fetched data
+
+document.getElementById('quarterLabel').textContent = QUARTER.label;
+
+// --- Init ---
+async function init() {
+  ui.setStatus('info', 'Authenticating...');
+
+  let user;
+  try {
+    user = await quick.id.waitForUser();
+    console.log('[Hub] User detected:', user.email);
+  } catch (err) {
+    console.error('[Hub] Auth failed:', err);
+    document.getElementById('access-denied').style.display = '';
+    document.querySelector('.tab-nav').style.display = 'none';
+    ui.setStatus('error', `Authentication failed: ${err.message || 'Could not detect user'}`);
+    return;
+  }
+
+  const email = user.email.toLowerCase();
+  const isManager = MANAGER_EMAILS.includes(email);
+  const repInfo = REP_ROSTER[email];
+  const isViewer = !isManager && !repInfo;
+
+  currentUser = {
+    email,
+    name: repInfo ? repInfo.name : (isViewer ? 'Viewer' : 'Manager'),
+    sfName: repInfo ? repInfo.sfName : null,
+    isManager: isManager || isViewer,
+  };
+
+  // Log session for analytics
+  try { quick.db.collection('hub_sessions').create({ email, created_at: new Date().toISOString() }); } catch (_) {}
+
+  // Manager: show coach + rep selectors
+  if (isManager) {
+    // Coach selector
+    const coachSel = document.getElementById('coachSelector');
+    coachSel.style.display = '';
+    for (const [teamId, coach] of Object.entries(COACHES)) {
+      const opt = document.createElement('option');
+      opt.value = teamId;
+      opt.textContent = coach.name;
+      coachSel.appendChild(opt);
+    }
+
+    // Rep selector
+    const repSel = document.getElementById('repSelector');
+    repSel.style.display = '';
+    populateRepSelector(repSel);
+  }
+
+  await Promise.all([loadBenchmarkOverrides(), loadQuotaFallback()]);
+  await loadData();
+}
+
+// --- Load data & render ---
+async function loadData(forceRefresh = false) {
+  ui.setStatus('info', 'Loading data from BigQuery...');
+
+  console.log('[Hub] Loading data...', { isManager: currentUser.isManager, selectedRep });
+
+  // Helper: run a query safely — return default on failure instead of rejecting
+  async function safe(label, fn, fallback) {
+    try {
+      const result = await fn();
+      console.log(`[Hub] ${label}: OK`, result);
+      return result;
+    } catch (err) {
+      console.error(`[Hub] ${label}: FAILED`, err);
+      return fallback;
+    }
+  }
+
+  if (currentUser.isManager && (!selectedRep || selectedRep === '__all__')) {
+    // Manager team view — fetch all reps (optionally filtered by coach team)
+    console.log('[Hub] Fetching team data...', { team: selectedTeam });
+    const [pipeline, wonPBR, callActivity, emailActivity, hygieneDeals, activityTrend, emailTrend, quotas, forecastCommit, repForecastDetails, teamStandards, teamOppsCreated] = await Promise.all([
+      safe('allRepsPipeline',  () => queries.fetchAllRepsPipeline(selectedTeam, forceRefresh), []),
+      safe('allRepsWonPBR',    () => queries.fetchAllRepsWonPBR(selectedTeam, forceRefresh), []),
+      safe('allRepsCalls',     () => queries.fetchAllRepsCallActivity(7, selectedTeam, forceRefresh), []),
+      safe('allRepsEmails',    () => queries.fetchAllRepsEmailActivity(7, selectedTeam, forceRefresh), []),
+      safe('teamHygiene',      () => queries.fetchDealHygieneFlags('__all__', selectedTeam, forceRefresh), []),
+      safe('teamTrend',        () => queries.fetchActivityTrending('__all__', 12, forceRefresh), []),
+      safe('emailTrend',       () => queries.fetchEmailTrending('__all__', 12, forceRefresh), []),
+      safe('quotas',           () => queries.fetchQuotas(selectedTeam, forceRefresh), []),
+      safe('forecastCommit',   () => queries.fetchAllRepsForecastCommit(selectedTeam, forceRefresh), []),
+      safe('repForecastDetails', () => queries.fetchAllRepsForecastDetails(selectedTeam, forceRefresh), []),
+      safe('teamStandards',    () => queries.fetchAllRepsStandardsMetrics(selectedTeam, forceRefresh), []),
+      safe('teamOppsCreated',  () => queries.fetchAllRepsOppsCreated(selectedTeam, forceRefresh), []),
+    ]);
+    appData = { pipeline, wonPBR, callActivity, emailActivity, hygieneDeals, activityTrend, emailTrend, quotas, forecastCommit, repForecastDetails, teamStandards, teamOppsCreated, selectedTeam, viewMode: 'team' };
+  } else {
+    // Single rep view
+    const rep = selectedRep && selectedRep !== '__all__'
+      ? REP_ROSTER[selectedRep]
+      : { sfName: currentUser.sfName, name: currentUser.name };
+    const repEmail = selectedRep && selectedRep !== '__all__' ? selectedRep : currentUser.email;
+    console.log('[Hub] Fetching rep data for:', rep.sfName, repEmail);
+
+    const [pipeline, wonPBR, callActivity, emailActivity, recentCalls, hygieneDeals, activityTrend, emailTrend, teamActivityTrend, teamPipeline, teamWonPBR, quotas, forecastCommit, standards, oppsCreated] = await Promise.all([
+      safe('pipeline',     () => queries.fetchPipelineData(rep.sfName, forceRefresh), []),
+      safe('wonPBR',       () => queries.fetchWonPBR(rep.sfName, forceRefresh), 0),
+      safe('calls',        () => queries.fetchCallActivity(repEmail, 7, forceRefresh), {}),
+      safe('emails',       () => queries.fetchEmailActivity(repEmail, 7, forceRefresh), {}),
+      safe('recent',       () => queries.fetchRecentCalls(repEmail, 14, forceRefresh), []),
+      safe('hygiene',      () => queries.fetchDealHygieneFlags(rep.sfName, null, forceRefresh), []),
+      safe('activityTrend',() => queries.fetchActivityTrending(repEmail, 12, forceRefresh), []),
+      safe('emailTrend',   () => queries.fetchEmailTrending(repEmail, 12, forceRefresh), []),
+      safe('teamTrend',    () => queries.fetchActivityTrending('__all__', 12, forceRefresh), []),
+      safe('teamPipeline', () => queries.fetchAllRepsPipeline(null, forceRefresh), []),
+      safe('teamWonPBR',   () => queries.fetchAllRepsWonPBR(null, forceRefresh), []),
+      safe('quotas',       () => queries.fetchQuotas(null, forceRefresh), []),
+      safe('forecastCommit',() => queries.fetchForecastCommit(rep.sfName, forceRefresh), 0),
+      safe('standards',    () => queries.fetchStandardsMetrics(rep.sfName, forceRefresh), {}),
+      safe('oppsCreated',  () => queries.fetchOppsCreated(rep.sfName, forceRefresh), 0),
+    ]);
+    appData = { pipeline, wonPBR, callActivity, emailActivity, recentCalls, hygieneDeals, activityTrend, emailTrend, teamActivityTrend, teamPipeline, teamWonPBR, quotas, forecastCommit, standards, oppsCreated, repName: rep.name, repEmail, sfName: rep.sfName, viewMode: 'rep' };
+  }
+
+  ui.setStatus('', '');
+  window.__appData = appData;
+  window.__currentUser = currentUser;
+  lastLoadTime = Date.now();
+  updateLastUpdatedLabel();
+  await renderAll();
+}
+
+async function renderAll() {
+  destroyAllCharts();
+  const renders = [
+    ['overview',  () => renderOverview(appData, currentUser)],
+    ['tiering',   () => renderTiering(appData, currentUser)],
+    ['toolkit',   () => renderAITools()],
+  ];
+  for (const [name, fn] of renders) {
+    try { await fn(); } catch (err) { console.error(`[Hub] Render error in ${name}:`, err); }
+  }
+}
+
+// --- Manager coach selector ---
+window.onCoachChange = function(value) {
+  selectedTeam = value === '__all__' ? null : value;
+  selectedRep = '__all__'; // reset rep to all when switching coach
+  const repSel = document.getElementById('repSelector');
+  if (repSel) {
+    repSel.value = '__all__';
+    populateRepSelector(repSel);
+  }
+  loadData();
+};
+
+// --- Manager rep selector ---
+window.onRepChange = function(value) {
+  selectedRep = value;
+  loadData();
+};
+
+// Helper: populate rep dropdown filtered by selected team
+function populateRepSelector(sel) {
+  // Remove all options except "All reps"
+  while (sel.options.length > 1) sel.remove(1);
+  for (const [repEmail, rep] of Object.entries(REP_ROSTER)) {
+    if (selectedTeam && rep.team !== selectedTeam) continue;
+    const opt = document.createElement('option');
+    opt.value = repEmail;
+    opt.textContent = rep.name;
+    sel.appendChild(opt);
+  }
+}
+
+// --- Refresh ---
+window.refreshData = async function() {
+  await queries.clearCache();
+  await loadData(true);
+};
+
+// --- Last-updated label ---
+let lastLoadTime = Date.now();
+function updateLastUpdatedLabel() {
+  const el = document.getElementById('lastUpdated');
+  if (!el) return;
+  const ago = Math.floor((Date.now() - lastLoadTime) / 60000);
+  el.textContent = ago < 1 ? 'Updated just now' : `Updated ${ago}m ago`;
+}
+setInterval(updateLastUpdatedLabel, 60000);
+
+// --- Auto-refresh on tab focus ---
+const MIN_RELOAD_INTERVAL = 10 * 60 * 1000; // 10 minutes
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastLoadTime > MIN_RELOAD_INTERVAL) {
+    await loadData(false);
+  }
+});
+
+// --- Refresh Health Data (team hygiene only) ---
+window.refreshHealthData = async function() {
+  const btn = document.querySelector('#overview-subtab-content .refresh-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
+  try {
+    const isTeamView = currentUser.isManager && (!selectedRep || selectedRep === '__all__');
+    const hygieneDeals = await queries.fetchDealHygieneFlags(
+      isTeamView ? '__all__' : (REP_ROSTER[selectedRep] || { sfName: currentUser.sfName }).sfName,
+      isTeamView ? selectedTeam : null,
+      true
+    );
+    appData.hygieneDeals = hygieneDeals;
+    window.__appData = appData;
+    window.switchOverviewSubtab('health');
+  } catch (err) {
+    console.error('[Hub] Health refresh failed', err);
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+};
+init();
+</script>
+</body>
+</html>
