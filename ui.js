@@ -19,7 +19,7 @@ export function switchTab(tabName) {
     }
   }
   // Log tab view for analytics
-  try { quick.db.collection('hub_tab_views').create({ email: window.__currentUser?.email || '', tab: tabName, subtab: null, created_at: new Date().toISOString() }); } catch (_) {}
+  try { quick.db.collection('coaching_hub_tab_views').create({ email: window.__currentUser?.email || '', tab: tabName, subtab: null, created_at: new Date().toISOString() }); } catch (_) {}
 }
 
 // --- Formatters ---

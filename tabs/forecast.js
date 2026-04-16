@@ -5,7 +5,7 @@ import { saveForecastSnapshot, getForecastSnapshots, cleanupOldSnapshots } from 
 import { createBarChart, repBarDataset, teamAvgBarDataset, currencyTick, computeTeamAvgByStage, COLORS } from '../chart-utils.js';
 import { streamAI } from '../ai-stream.js';
 
-const FORECAST_RISK_CACHE = quick.db.collection('hub_forecast_risk');
+const FORECAST_RISK_CACHE = quick.db.collection('coaching_hub_forecast_risk');
 const RISK_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
 
 export async function renderForecast(data, user, targetEl = null) {

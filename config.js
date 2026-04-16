@@ -1,4 +1,7 @@
-// SalesHub — Configuration (AMER SMB Cross-Sell — Gabe Teperow's org)
+// Coaching Hub — Configuration (AMER SMB Cross-Sell — Gabe Teperow's org)
+// v1.0.0
+
+// ─── Rep Roster (from Jamie's amer-crosssell-hub, verified) ───
 
 export const REP_ROSTER = {
   // D2CRETAIL1 — Estin Guerrero's team
@@ -39,7 +42,7 @@ export const REP_ROSTER = {
   'adam.fearing@shopify.com':           { name: 'Adam Fearing',            sfName: 'Adam Fearing',            team: 'D2CRETAIL4' },
   'austin.friesen@shopify.com':         { name: 'Austin Friesen',          sfName: 'Austin Friesen',          team: 'D2CRETAIL4' },
   'carly.campbell@shopify.com':         { name: 'Carly Campbell',          sfName: 'Carly Campbell',          team: 'D2CRETAIL4' },
-  'eric.liu@shopify.com':              { name: 'Eric liu',                sfName: 'Eric liu',                team: 'D2CRETAIL4' },
+  'eric.liu@shopify.com':              { name: 'Eric Liu',                sfName: 'Eric Liu',                team: 'D2CRETAIL4' },
   'joseph.park@shopify.com':           { name: 'Joseph Park',             sfName: 'Joseph Park',             team: 'D2CRETAIL4' },
   'laura.moran@shopify.com':           { name: 'Laura Moran',             sfName: 'Laura Moran',             team: 'D2CRETAIL4' },
   'nivin.dinkha@shopify.com':          { name: 'Nivin Dinkha',            sfName: 'Nivin Dinkha',            team: 'D2CRETAIL4' },
@@ -79,6 +82,7 @@ export const MANAGER_EMAILS = [
   'kyle.thekkek@shopify.com',
   'tori.douglas@shopify.com',
   'ryan.self@shopify.com',
+  'venkat.iyer@shopify.com', // RevOps access
 ];
 
 // Coach quotas — initial estimates, will be overridden by BQ dynamic lookup
@@ -91,7 +95,16 @@ export const COACH_QUOTAS = {
   D2CRETAIL6: 0,
 };
 
-export const QUOTA_USD = 1_961_001;
+export const COACHES = {
+  D2CRETAIL1: { name: 'Estin Guerrero',    email: 'estin.guerrero@shopify.com',   leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL1' },
+  D2CRETAIL2: { name: 'Jamie Clapham',     email: 'jamie.clapham@shopify.com',    leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL2' },
+  D2CRETAIL3: { name: 'Sydney Johnson',    email: 'sydney.johnson@shopify.com',   leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL3' },
+  D2CRETAIL4: { name: 'Kyle Thekkek',      email: 'kyle.thekkek@shopify.com',     leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL4' },
+  D2CRETAIL5: { name: 'Tori Douglas',      email: 'tori.douglas@shopify.com',     leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL5' },
+  D2CRETAIL6: { name: 'Ryan Self',         email: 'ryan.self@shopify.com',        leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL6' },
+};
+
+// ─── Quarter computation ───
 
 function computeQuarter(offset = 0) {
   const d = new Date();
@@ -106,6 +119,8 @@ function computeQuarter(offset = 0) {
 
 export const QUARTER      = computeQuarter(0);
 export const NEXT_QUARTER = computeQuarter(1);
+
+export const QUOTA_USD = 1_961_001;
 
 export const STAGE_ORDER = ['Pre-Qualified', 'Envision', 'Solution', 'Demonstrate', 'Deal-Craft'];
 
@@ -125,6 +140,11 @@ export const BENCHMARKS = {
 
 export const SALESFORCE_BASE_URL = 'https://banff.lightning.force.com/lightning/r/Opportunity';
 
+// ─── Role pattern for dynamic team resolution ───
+export const ROLE_PATTERN = 'AMER-SALES-REP-SMB-ALL-X-ALL-D2CRETAIL';
+
+// ─── Helpers ───
+
 export function getAllSfNames(team = null) {
   const entries = Object.values(REP_ROSTER);
   const filtered = team ? entries.filter(r => r.team === team) : entries;
@@ -135,20 +155,7 @@ export function sfNamesSqlList(team = null) {
   return getAllSfNames(team).map(n => `'${n.replace(/'/g, "\\'")}'`).join(',');
 }
 
-// Role pattern for dynamic team resolution via sales_users_daily_snapshot
-export const ROLE_PATTERN = 'AMER-SALES-REP-SMB-ALL-X-ALL-D2CRETAIL';
-
-// Coach metadata (for coach filter + quota lookup)
-export const COACHES = {
-  D2CRETAIL1: { name: 'Estin Guerrero',    email: 'estin.guerrero@shopify.com',   leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL1' },
-  D2CRETAIL2: { name: 'Jamie Clapham',     email: 'jamie.clapham@shopify.com',    leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL2' },
-  D2CRETAIL3: { name: 'Sydney Johnson',    email: 'sydney.johnson@shopify.com',   leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL3' },
-  D2CRETAIL4: { name: 'Kyle Thekkek',      email: 'kyle.thekkek@shopify.com',     leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL4' },
-  D2CRETAIL5: { name: 'Tori Douglas',      email: 'tori.douglas@shopify.com',     leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL5' },
-  D2CRETAIL6: { name: 'Ryan Self',         email: 'ryan.self@shopify.com',        leadRole: 'AMER-SALES-LEAD-SMB-ALL-X-ALL-D2CRETAIL6' },
-};
-
-// ─── Manager-editable quota fallback (persisted in hub_manager_settings) ───
+// ─── Manager-editable quota fallback (persisted in quick.db) ───
 
 let _quotaFallback = QUOTA_USD;
 
@@ -156,14 +163,14 @@ export function getQuotaFallback() { return _quotaFallback; }
 
 export async function loadQuotaFallback() {
   try {
-    const col = quick.db.collection('hub_manager_settings');
+    const col = quick.db.collection('coaching_hub_settings');
     const items = await col.where({ key: 'rep_quota_fallback' }).limit(1).find();
     if (items.length) {
       const num = Number(items[0].value);
       if (num > 0) _quotaFallback = num;
     }
   } catch (err) {
-    console.error('[Hub] Failed to load quota fallback:', err);
+    console.error('[CoachHub] Failed to load quota fallback:', err);
   }
   return _quotaFallback;
 }
@@ -172,7 +179,7 @@ export async function saveQuotaFallback(value) {
   _quotaFallback = value;
   const key = 'rep_quota_fallback';
   try {
-    const col = quick.db.collection('hub_manager_settings');
+    const col = quick.db.collection('coaching_hub_settings');
     const items = await col.where({ key }).limit(1).find();
     if (value === QUOTA_USD) {
       if (items.length) await col.delete(items[0]._id);
@@ -182,17 +189,17 @@ export async function saveQuotaFallback(value) {
       await col.create({ key, value: String(value) });
     }
   } catch (err) {
-    console.error('[Hub] Failed to save quota fallback:', err);
+    console.error('[CoachHub] Failed to save quota fallback:', err);
   }
 }
 
-// ─── Manager-editable benchmark overrides (persisted in hub_manager_settings) ───
+// ─── Manager-editable benchmark overrides ───
 
 const BENCHMARK_FIELDS = Object.keys(BENCHMARKS);
 
 export async function loadBenchmarkOverrides() {
   try {
-    const col = quick.db.collection('hub_manager_settings');
+    const col = quick.db.collection('coaching_hub_settings');
     const items = await col.where({}).find();
     for (const item of items) {
       if (!item.key?.startsWith('benchmark_')) continue;
@@ -202,7 +209,7 @@ export async function loadBenchmarkOverrides() {
       if (num > 0) BENCHMARKS[field] = num;
     }
   } catch (err) {
-    console.error('[Hub] Failed to load benchmark overrides:', err);
+    console.error('[CoachHub] Failed to load benchmark overrides:', err);
   }
   return BENCHMARKS;
 }
@@ -212,7 +219,7 @@ export async function saveBenchmarkOverride(field, value) {
   const key = `benchmark_${field}`;
   BENCHMARKS[field] = value;
   try {
-    const col = quick.db.collection('hub_manager_settings');
+    const col = quick.db.collection('coaching_hub_settings');
     const items = await col.where({ key }).limit(1).find();
     if (items.length) {
       await col.update(items[0]._id, { value: String(value) });
@@ -220,6 +227,6 @@ export async function saveBenchmarkOverride(field, value) {
       await col.create({ key, value: String(value) });
     }
   } catch (err) {
-    console.error('[Hub] Failed to save benchmark override:', err);
+    console.error('[CoachHub] Failed to save benchmark override:', err);
   }
 }

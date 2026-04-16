@@ -6,7 +6,7 @@ import { QUARTER, BENCHMARKS, REP_ROSTER, getQuotaFallback } from './config.js';
 import { formatUSD, daysLeft, computeDealRisks, toDateStr, computeHygieneScore, computeHygieneFlags } from './ui.js';
 import { streamAI } from './ai-stream.js';
 
-const PRIORITIES_CACHE = quick.db.collection('hub_priorities');
+const PRIORITIES_CACHE = quick.db.collection('coaching_hub_priorities');
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 export async function generatePriorities(data, container) {

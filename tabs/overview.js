@@ -3,23 +3,23 @@
 import { QUOTA_USD, BENCHMARKS, REP_ROSTER, QUARTER, NEXT_QUARTER, COACH_QUOTAS, COACHES, STAGE_ORDER, saveBenchmarkOverride, getQuotaFallback, saveQuotaFallback } from '../config.js';
 import { formatUSD, formatUSDFull, formatPct, daysLeft, renderMetricCard, computeDealRisks, renderRiskBadge, formatDate, toDateStr, renderSparkline, renderDelta, computeHygieneFlags, getISOWeek, sfLink } from '../ui.js';
 import { generatePriorities } from '../ai-priorities.js';
-import { fetchWeeklyWonPBR, fetchAllRepsWeeklyWonPBR, fetchNextQuarterPipeline, fetchRepActivityComparison, fetchTranscriptDetails, fetchCallWithTranscript, fetchNextQuarterQuotas, fetchNextQuarterWonPBR, fetchAllRepsNextQuarterWonPBR } from '../queries.js';
+import { fetchWeeklyWonPBR, fetchAllRepsWeeklyWonPBR, fetchNextQuarterPipeline, fetchRepActivityComparison, fetchTranscriptDetails, fetchCallWithTranscript, fetchNextQuarterQuotas, fetchNextQuarterWonPBR, fetchAllRepsNextQuarterWonPBR, fetchAllRepsRecentCalls } from '../queries.js';
 import { createLineChart, createBarChart, repLineDataset, teamAvgLineDataset, repBarDataset, teamAvgBarDataset, COLORS, formatWeekLabel, currencyTick, computeWeeklyTeamAvg, destroyChart, dimLineDataset, MEDDIC_DIM_COLORS } from '../chart-utils.js';
 import { streamAI } from '../ai-stream.js';
 import { renderForecast } from './forecast.js';
 import { renderHealth } from './health.js';
 
 let currentSubtab = 'performance';
-const dealCoachingCache = quick.db.collection('hub_deal_coaching');
+const dealCoachingCache = quick.db.collection('coaching_hub_deal_coaching');
 const COACHING_TTL_MS = 24 * 60 * 60 * 1000; // 24h
-const outlookMeddicCache = quick.db.collection('hub_outlook_meddic');
-const outlookActionsCache = quick.db.collection('hub_outlook_actions');
+const outlookMeddicCache = quick.db.collection('coaching_hub_outlook_meddic');
+const outlookActionsCache = quick.db.collection('coaching_hub_outlook_actions');
 let outlookDrillRep = null; // null = team view, sfName = drilled rep
 
 // MEDDIC scoring caches
-const MEDDIC_CACHE = quick.db.collection('hub_meddic');
+const MEDDIC_CACHE = quick.db.collection('coaching_hub_meddic');
 const MEDDIC_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (weekly snapshots)
-const MEDDIC_CALL_CACHE = quick.db.collection('hub_meddic_call');
+const MEDDIC_CALL_CACHE = quick.db.collection('coaching_hub_meddic_call');
 const MEDDIC_CALL_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // ─── Entry point ───
@@ -61,7 +61,7 @@ function subtabNav(isManager = false) {
 window.switchOverviewSubtab = function(tab) {
   currentSubtab = tab;
   if (tab !== 'outlook') outlookDrillRep = null;
-  try { quick.db.collection('hub_tab_views').create({ email: window.__currentUser?.email || '', tab: 'overview', subtab: tab, created_at: new Date().toISOString() }); } catch (_) {}
+  try { quick.db.collection('coaching_hub_tab_views').create({ email: window.__currentUser?.email || '', tab: 'overview', subtab: tab, created_at: new Date().toISOString() }); } catch (_) {}
   document.querySelectorAll('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === tab));
   const data = window.__appData || {};
   if (data.viewMode === 'team') {
@@ -1164,9 +1164,9 @@ function renderTeamBenchmark(data) {
 
 // ─── Analytics sub-tab (manager only) ───
 
-const usageCollection = quick.db.collection('hub_tool_usage');
-const sessionsCollection = quick.db.collection('hub_sessions');
-const tabViewsCollection = quick.db.collection('hub_tab_views');
+const usageCollection = quick.db.collection('coaching_hub_tool_usage');
+const sessionsCollection = quick.db.collection('coaching_hub_sessions');
+const tabViewsCollection = quick.db.collection('coaching_hub_tab_views');
 
 const TOOL_NAMES = {
   email_composer: 'Email Composer',
@@ -1347,7 +1347,9 @@ function renderRepCoaching(data) {
   const recentRows = recent.slice(0, 20).map(c => {
     const platform = (c.platform || '').replace('salesloft_', '').replace('google_', '');
     const duration = c.call_duration_minutes ? `${Math.round(c.call_duration_minutes)}m` : '—';
-    const title = c.call_title || '—';
+    const rawTitle = c.call_title || '—';
+    const crmCallLink = c.source_table === 'crm' ? `<a href="https://vault.shopify.io/crm/calls/${c.call_id}" target="_blank" style="color:var(--accent);text-decoration:none">${rawTitle}</a>` : rawTitle;
+    const title = crmCallLink;
     const hasSummary = c.summary_text ? true : false;
     const hasTranscript = c.has_transcript;
     const transcriptBadge = hasTranscript
@@ -1904,7 +1906,7 @@ async function loadRevenueTrend(data) {
 //  TEAM / MANAGER VIEW
 // ════════════════════════════════════════════════════════════════════
 
-const managerSettings = quick.db.collection('hub_manager_settings');
+const managerSettings = quick.db.collection('coaching_hub_manager_settings');
 
 async function getManagerTarget() {
   try {
@@ -2048,6 +2050,7 @@ function renderTeamSubtabContent(data) {
     el.innerHTML = renderRepDeals(repMetrics(data));
   } else if (currentSubtab === 'coaching') {
     el.innerHTML = renderTeamCoaching();
+    loadTeamRecentCalls(data);
     loadTeamMEDDIC();
     loadTeamMEDDICTrend();
     loadTeamMEDDICDistribution();
@@ -2323,7 +2326,7 @@ function renderTeamPerformance(data, tm) {
         <thead><tr>
           <th>Rep</th><th class="text-right">Attainment</th><th class="text-right">Won PBR</th>
           <th class="text-right">Gap</th><th class="text-right">Pipeline</th><th class="text-right" title="Pipeline excl. Pre-Qualified / Gap">Coverage</th>
-          <th class="text-right">Calls</th><th class="text-right">Meetings</th>
+          <th class="text-right" title="Last 7 days">Calls (L7D)</th><th class="text-right" title="Last 7 days">Meetings (L7D)</th>
         </tr></thead>
         <tbody>${repTableRows}</tbody>
       </table>
@@ -2477,6 +2480,48 @@ async function loadTeamRevenueTrend(data) {
 
 // ─── Team Coaching sub-tab ───
 
+async function loadTeamRecentCalls(data) {
+  const container = document.getElementById('team-recent-calls-container');
+  if (!container) return;
+  try {
+    const calls = await fetchAllRepsRecentCalls(14, data.selectedTeam || null, false);
+    if (!calls || calls.length === 0) {
+      container.innerHTML = '<div class="empty-state">No calls found in the last 14 days.</div>';
+      return;
+    }
+    const repMap = {};
+    for (const [email, rep] of Object.entries(REP_ROSTER)) repMap[email] = rep.name;
+    const rows = calls.slice(0, 30).map(c => {
+      const repName = repMap[c.rep_email] || c.rep_email;
+      const platform = (c.platform || '').replace('twilio_1p_crm', 'CRM Dialer').replace('twilio', 'CRM Dialer').replace('google_meet', 'Google Meet').replace('salesloft_dialer', 'SL Dialer').replace('salesloft_conversation', 'SL Meet');
+      const duration = c.duration_min ? `${Math.round(c.duration_min)}m` : '\u2014';
+      const title = c.title || '\u2014';
+      const crmLink = c.source_table === 'crm' ? `<a href="https://vault.shopify.io/crm/calls/${c.call_id}" target="_blank" style="color:var(--accent);text-decoration:none" title="Open in CRM">${title}</a>` : title;
+      const transcriptBadge = c.has_transcript ? '<span style="color:var(--accent)">Yes</span>' : '<span class="text-muted">No</span>';
+      const summaryRow = c.summary_text ? `<tr><td colspan="7" style="padding:4px 10px 12px;font-size:12px;color:var(--text-secondary);border-bottom:1px solid var(--border)"><em>${c.summary_text.substring(0, 200)}${c.summary_text.length > 200 ? '...' : ''}</em></td></tr>` : '';
+      return `<tr>
+        <td>${formatDate(c.occurred_at)}</td>
+        <td><strong>${repName}</strong></td>
+        <td class="text-truncate">${crmLink}</td>
+        <td>${platform}</td>
+        <td>${duration}</td>
+        <td>${c.disposition || '\u2014'}</td>
+        <td>${transcriptBadge}</td>
+      </tr>${summaryRow}`;
+    }).join('');
+    container.innerHTML = `
+      <table class="data-table" style="table-layout:fixed">
+        <colgroup><col style="width:10%"><col style="width:16%"><col style="width:24%"><col style="width:14%"><col style="width:8%"><col style="width:14%"><col style="width:14%"></colgroup>
+        <thead><tr><th>Date</th><th>Rep</th><th>Call</th><th>Platform</th><th>Dur.</th><th>Disposition</th><th>Transcript</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">Showing ${Math.min(calls.length, 30)} of ${calls.length} calls (L14D). Sources: CRM Dialer (Twilio) + Google Meet.</div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error loading calls: ${err.message}</div>`;
+  }
+}
+
 function renderTeamCoaching() {
   const teamLabel = window.__appData?.selectedTeam
     ? (COACHES[window.__appData.selectedTeam]?.name || window.__appData.selectedTeam)
@@ -2484,7 +2529,14 @@ function renderTeamCoaching() {
   return `
     <div class="hero-banner">
       <div class="hero-title">${teamLabel} Coaching · ${QUARTER.label}</div>
-      <div class="hero-name">MEDDIC analysis across all reps</div>
+      <div class="hero-name">Call activity + MEDDIC analysis across all reps</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Recent Team Calls (L14D) <span style="font-size:12px;color:var(--text-muted);font-weight:400;margin-left:8px">Unified: CRM Dialer + Google Meet</span></div>
+      <div id="team-recent-calls-container">
+        <div class="ai-loading">Loading calls from BigQuery...</div>
+      </div>
     </div>
 
     <div class="overview-two-col">

@@ -3,9 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SalesHub</title>
-<script src="/client/quick.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<meta name="quick" content="yesindex">
+<title>Coaching Hub — AMER Cross-Sell</title>
+<!-- Quick Standards -->
+<script nonce="3eea3aa4d4276978856607cda2ded320" src="/client/quick.js"></script>
+<script nonce="3eea3aa4d4276978856607cda2ded320" src="https://quicklytics.quick.shopify.io/quicklytics.min.js"></script>
+<script nonce="3eea3aa4d4276978856607cda2ded320" src="https://quicklytics.quick.shopify.io/quicklytics-viewcounter.min.js"></script>
+<!-- Chart.js -->
+<script nonce="3eea3aa4d4276978856607cda2ded320" src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -15,7 +20,8 @@
   <header class="hub-header">
     <div class="header-left">
       <img src="img/shopify-logo.svg" alt="Shopify" class="hub-logo">
-      <h1>SalesHub</h1>
+      <h1>Coaching Hub</h1>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:8px">v1.0.0</span>
     </div>
     <div class="header-right">
       <select id="coachSelector" class="manager-rep-selector" style="display:none" onchange="window.onCoachChange(this.value)">
@@ -48,12 +54,12 @@
   <!-- Access denied (hidden by default) -->
   <div class="access-denied" id="access-denied" style="display:none">
     <h2>Access restricted</h2>
-    <p>This dashboard is for the AMER SMB Cross-Sell team.<br>Contact <strong>@jamie.clapham</strong> on Slack for access.</p>
+    <p>This dashboard is for the AMER SMB Cross-Sell team.<br>Contact <strong>@jamie.clapham</strong> or <strong>@venkat.iyer</strong> on Slack for access.</p>
   </div>
 
 </div>
 
-<script type="module">
+<script nonce="3eea3aa4d4276978856607cda2ded320" type="module">
 import { REP_ROSTER, MANAGER_EMAILS, QUARTER, COACHES, COACH_QUOTAS, loadBenchmarkOverrides, loadQuotaFallback } from './config.js';
 import * as ui from './ui.js';
 import * as queries from './queries.js';
@@ -62,14 +68,13 @@ import { renderAITools } from './tabs/ai-tools.js';
 import { renderTiering } from './tabs/tiering.js';
 import { destroyAllCharts } from './chart-utils.js';
 
-// Expose ui to inline onclick handlers
 window.ui = ui;
 
 // --- App state ---
-let currentUser = null;   // { email, name, sfName, isManager }
-let selectedRep = null;    // email string or '__all__' — for manager drill-down
-let selectedTeam = null;   // 'D2CRETAIL1', 'D2CRETAIL2', or null (all)
-let appData = {};          // fetched data
+let currentUser = null;
+let selectedRep = null;
+let selectedTeam = null;
+let appData = {};
 
 document.getElementById('quarterLabel').textContent = QUARTER.label;
 
@@ -80,9 +85,9 @@ async function init() {
   let user;
   try {
     user = await quick.id.waitForUser();
-    console.log('[Hub] User detected:', user.email);
+    console.log('[CoachHub] User detected:', user.email);
   } catch (err) {
-    console.error('[Hub] Auth failed:', err);
+    console.error('[CoachHub] Auth failed:', err);
     document.getElementById('access-denied').style.display = '';
     document.querySelector('.tab-nav').style.display = 'none';
     ui.setStatus('error', `Authentication failed: ${err.message || 'Could not detect user'}`);
@@ -101,12 +106,9 @@ async function init() {
     isManager: isManager || isViewer,
   };
 
-  // Log session for analytics
-  try { quick.db.collection('hub_sessions').create({ email, created_at: new Date().toISOString() }); } catch (_) {}
+  try { quick.db.collection('coaching_hub_sessions').create({ email, created_at: new Date().toISOString() }); } catch (_) {}
 
-  // Manager: show coach + rep selectors
   if (isManager) {
-    // Coach selector
     const coachSel = document.getElementById('coachSelector');
     coachSel.style.display = '';
     for (const [teamId, coach] of Object.entries(COACHES)) {
@@ -115,8 +117,6 @@ async function init() {
       opt.textContent = coach.name;
       coachSel.appendChild(opt);
     }
-
-    // Rep selector
     const repSel = document.getElementById('repSelector');
     repSel.style.display = '';
     populateRepSelector(repSel);
@@ -128,25 +128,20 @@ async function init() {
 
 // --- Load data & render ---
 async function loadData(forceRefresh = false) {
-  ui.setStatus('info', 'Loading data from BigQuery...');
+  ui.setStatus('info', 'Loading data from BigQuery (unified CRM + DW)...');
 
-  console.log('[Hub] Loading data...', { isManager: currentUser.isManager, selectedRep });
-
-  // Helper: run a query safely — return default on failure instead of rejecting
   async function safe(label, fn, fallback) {
     try {
       const result = await fn();
-      console.log(`[Hub] ${label}: OK`, result);
+      console.log(`[CoachHub] ${label}: OK`, result);
       return result;
     } catch (err) {
-      console.error(`[Hub] ${label}: FAILED`, err);
+      console.error(`[CoachHub] ${label}: FAILED`, err);
       return fallback;
     }
   }
 
   if (currentUser.isManager && (!selectedRep || selectedRep === '__all__')) {
-    // Manager team view — fetch all reps (optionally filtered by coach team)
-    console.log('[Hub] Fetching team data...', { team: selectedTeam });
     const [pipeline, wonPBR, callActivity, emailActivity, hygieneDeals, activityTrend, emailTrend, quotas, forecastCommit, repForecastDetails, teamStandards, teamOppsCreated] = await Promise.all([
       safe('allRepsPipeline',  () => queries.fetchAllRepsPipeline(selectedTeam, forceRefresh), []),
       safe('allRepsWonPBR',    () => queries.fetchAllRepsWonPBR(selectedTeam, forceRefresh), []),
@@ -163,12 +158,10 @@ async function loadData(forceRefresh = false) {
     ]);
     appData = { pipeline, wonPBR, callActivity, emailActivity, hygieneDeals, activityTrend, emailTrend, quotas, forecastCommit, repForecastDetails, teamStandards, teamOppsCreated, selectedTeam, viewMode: 'team' };
   } else {
-    // Single rep view
     const rep = selectedRep && selectedRep !== '__all__'
       ? REP_ROSTER[selectedRep]
       : { sfName: currentUser.sfName, name: currentUser.name };
     const repEmail = selectedRep && selectedRep !== '__all__' ? selectedRep : currentUser.email;
-    console.log('[Hub] Fetching rep data for:', rep.sfName, repEmail);
 
     const [pipeline, wonPBR, callActivity, emailActivity, recentCalls, hygieneDeals, activityTrend, emailTrend, teamActivityTrend, teamPipeline, teamWonPBR, quotas, forecastCommit, standards, oppsCreated] = await Promise.all([
       safe('pipeline',     () => queries.fetchPipelineData(rep.sfName, forceRefresh), []),
@@ -206,14 +199,14 @@ async function renderAll() {
     ['toolkit',   () => renderAITools()],
   ];
   for (const [name, fn] of renders) {
-    try { await fn(); } catch (err) { console.error(`[Hub] Render error in ${name}:`, err); }
+    try { await fn(); } catch (err) { console.error(`[CoachHub] Render error in ${name}:`, err); }
   }
 }
 
-// --- Manager coach selector ---
+// --- Coach selector ---
 window.onCoachChange = function(value) {
   selectedTeam = value === '__all__' ? null : value;
-  selectedRep = '__all__'; // reset rep to all when switching coach
+  selectedRep = '__all__';
   const repSel = document.getElementById('repSelector');
   if (repSel) {
     repSel.value = '__all__';
@@ -222,15 +215,13 @@ window.onCoachChange = function(value) {
   loadData();
 };
 
-// --- Manager rep selector ---
+// --- Rep selector ---
 window.onRepChange = function(value) {
   selectedRep = value;
   loadData();
 };
 
-// Helper: populate rep dropdown filtered by selected team
 function populateRepSelector(sel) {
-  // Remove all options except "All reps"
   while (sel.options.length > 1) sel.remove(1);
   for (const [repEmail, rep] of Object.entries(REP_ROSTER)) {
     if (selectedTeam && rep.team !== selectedTeam) continue;
@@ -258,14 +249,14 @@ function updateLastUpdatedLabel() {
 setInterval(updateLastUpdatedLabel, 60000);
 
 // --- Auto-refresh on tab focus ---
-const MIN_RELOAD_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const MIN_RELOAD_INTERVAL = 10 * 60 * 1000;
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState === 'visible' && Date.now() - lastLoadTime > MIN_RELOAD_INTERVAL) {
     await loadData(false);
   }
 });
 
-// --- Refresh Health Data (team hygiene only) ---
+// --- Refresh Health Data ---
 window.refreshHealthData = async function() {
   const btn = document.querySelector('#overview-subtab-content .refresh-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
@@ -280,11 +271,14 @@ window.refreshHealthData = async function() {
     window.__appData = appData;
     window.switchOverviewSubtab('health');
   } catch (err) {
-    console.error('[Hub] Health refresh failed', err);
+    console.error('[CoachHub] Health refresh failed', err);
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
 };
+
 init();
 </script>
+<!-- Quick Standards: QuickThoughts feedback widget -->
+<script nonce="3eea3aa4d4276978856607cda2ded320" src="https://quickthoughts.quick.shopify.io/quick-thoughts.min.js"></script>
 </body>
 </html>

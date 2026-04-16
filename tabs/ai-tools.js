@@ -4,7 +4,7 @@ import { renderAccountResearch } from '../ai-tools/account-research.js';
 import { renderObjectionHandler } from '../ai-tools/objection-handler.js';
 import { REP_ROSTER } from '../config.js';
 
-const TOOL_USAGE = quick.db.collection('hub_tool_usage');
+const TOOL_USAGE = quick.db.collection('coaching_hub_tool_usage');
 
 export function renderAITools() {
   const el = document.getElementById('tab-toolkit');
